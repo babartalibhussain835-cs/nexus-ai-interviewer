@@ -6,7 +6,7 @@ from PyPDF2 import PdfReader
 from textblob import TextBlob
 
 # =========================
-# CONFIG
+# PAGE CONFIG
 # =========================
 
 st.set_page_config(
@@ -14,46 +14,59 @@ st.set_page_config(
     layout="wide"
 )
 
+# =========================
+# GEMINI CONFIG
+# =========================
+
 API_KEY = os.getenv("GEMINI_API_KEY")
+
+model = None
 
 if API_KEY:
     genai.configure(api_key=API_KEY)
     model = genai.GenerativeModel("gemini-2.0-flash")
-else:
-    model = None
-
 
 # =========================
-# UI STYLE
+# DARK UI STYLE
 # =========================
 
 st.markdown("""
 <style>
 
 body {
-background:#0e1117;
+background-color:#0d1117;
+color:white;
+}
+
+.main {
+background-color:#0d1117;
 }
 
 .glass {
 background: rgba(255,255,255,0.05);
-border-radius:20px;
-padding:20px;
+border-radius:18px;
+padding:18px;
 border:1px solid rgba(0,255,255,0.2);
-backdrop-filter: blur(12px);
+backdrop-filter: blur(10px);
 margin-bottom:15px;
 }
 
 .status {
 color:#00ffff;
 font-weight:bold;
+font-size:18px;
+}
+
+button {
+background-color:#111827 !important;
+color:white !important;
 }
 
 </style>
 """, unsafe_allow_html=True)
 
-
 # =========================
-# SESSION STATE
+# SESSION VARIABLES
 # =========================
 
 if "q_index" not in st.session_state:
@@ -71,16 +84,16 @@ if "scores" not in st.session_state:
 if "resume_text" not in st.session_state:
     st.session_state.resume_text = ""
 
-
 # =========================
 # HEADER
 # =========================
 
-st.title("🧠 Nexus AI Intelligent Interviewer")
+st.title("🧠 Nexus AI Smart Interviewer")
 
-st.markdown('<p class="status">AI STATUS: Listening...</p>',
-            unsafe_allow_html=True)
-
+st.markdown(
+'<p class="status">AI STATUS: Listening...</p>',
+unsafe_allow_html=True
+)
 
 # =========================
 # SIDEBAR
@@ -88,15 +101,14 @@ st.markdown('<p class="status">AI STATUS: Listening...</p>',
 
 st.sidebar.header("Candidate Setup")
 
-resume = st.sidebar.file_uploader("Upload Resume PDF")
+resume = st.sidebar.file_uploader("Upload Resume (PDF)")
 
 job_description = st.sidebar.text_area(
-    "Paste Job Description"
+"Paste Job Description"
 )
 
-
 # =========================
-# RESUME PARSER
+# RESUME READER
 # =========================
 
 def extract_resume_text(file):
@@ -114,13 +126,14 @@ def extract_resume_text(file):
 if resume:
     st.session_state.resume_text = extract_resume_text(resume)
 
-
 # =========================
-# CAMERA PANEL
+# CAMERA SMALL PANEL
 # =========================
 
-st.camera_input("📷 Camera Presence Detection (Optional)")
+col1, col2 = st.columns([2,1])
 
+with col2:
+    st.camera_input("Presence Check 📷")
 
 # =========================
 # CHEATING DETECTION
@@ -144,7 +157,6 @@ def detect_cheating(answer):
 
     return False
 
-
 # =========================
 # SCORING ENGINE
 # =========================
@@ -153,14 +165,13 @@ def score_answer(answer):
 
     sentiment = TextBlob(answer).sentiment.polarity
 
-    length_score = min(len(answer.split()) / 10, 5)
+    confidence = (sentiment + 1) * 2
 
-    confidence_score = (sentiment + 1) * 2
+    length_score = min(len(answer.split()) / 12, 5)
 
-    total = round(length_score + confidence_score, 2)
+    total_score = round(confidence + length_score, 2)
 
-    return total
-
+    return total_score
 
 # =========================
 # QUESTION ENGINE
@@ -171,7 +182,7 @@ def generate_question():
     if not model:
         return "❌ GEMINI_API_KEY missing"
 
-    stage_map = [
+    stages = [
 
         "Resume introduction question",
 
@@ -179,11 +190,12 @@ def generate_question():
 
         "Technical scenario question",
 
-        "Problem solving question",
+        "Problem solving logic question",
 
-        "Behavioral teamwork question",
+        "Behavior teamwork question",
 
         "Failure handling leadership question"
+
     ]
 
     last_answer = ""
@@ -193,7 +205,7 @@ def generate_question():
 
     prompt = f"""
 
-You are Nexus AI Senior Recruiter.
+You are Nexus AI Senior Technical Recruiter.
 
 Candidate Resume:
 
@@ -211,14 +223,13 @@ Ask ONLY ONE interview question.
 
 Stage:
 
-{stage_map[st.session_state.q_index]}
+{stages[st.session_state.q_index]}
 
 """
 
     response = model.generate_content(prompt)
 
     return response.text
-
 
 # =========================
 # INTERVIEW FLOW
@@ -255,10 +266,9 @@ if st.session_state.q_index < 6:
 
             if detect_cheating(answer):
 
-                st.warning("⚠ Possible AI-generated answer detected")
+                st.warning("⚠ Suspicious response detected")
 
             st.session_state.q_index += 1
-
 
 # =========================
 # FINAL REPORT
@@ -290,7 +300,7 @@ if st.session_state.q_index >= 6:
 
     report = f"""
 
-NEXUS AI REPORT
+NEXUS AI INTERVIEW REPORT
 
 Date:
 
@@ -308,7 +318,7 @@ Scores:
 
 {st.session_state.scores}
 
-Verdict:
+Final Verdict:
 
 {verdict}
 
