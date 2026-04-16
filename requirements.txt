@@ -2,3 +2,4 @@ streamlit
 google-generativeai
 textblob
 PyPDF2
+protobuf>=4.25.3
