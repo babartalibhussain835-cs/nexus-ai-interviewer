@@ -1,114 +1,225 @@
 import streamlit as st
-import google.generativeai as genai
 import os
-import PyPDF2
+from PyPDF2 import PdfReader
+from textblob import TextBlob
+import google.generativeai as genai
+from datetime import datetime
 
-# --- Page Config ---
-st.set_page_config(page_title="Nexus-AI Elite", layout="wide", initial_sidebar_state="expanded")
+# =========================
+# CONFIG
+# =========================
 
-# --- Initialize Gemini ---
+st.set_page_config(page_title="Nexus-AI Interviewer", layout="wide")
+
 api_key = os.getenv("GEMINI_API_KEY")
+
+model = None
 if api_key:
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-2.0-flash')
-else:
-    st.error("❌ API Key Missing!")
+    model = genai.GenerativeModel("gemini-1.5-flash")
 
-# --- Elite CSS (Advanced UI) ---
+# =========================
+# CSS (Glassmorphism UI)
+# =========================
+
 st.markdown("""
-    <style>
-    /* Main Background */
-    .stApp { background-color: #0b0e11; color: #e1e1e1; }
-    
-    /* Sidebar Styling */
-    section[data-testid="stSidebar"] { background-color: #15191d !important; border-right: 1px solid #2d333b; }
-    
-    /* Custom Cards */
-    .glass-card {
-        background: #1c2128;
-        border-radius: 10px;
-        padding: 15px;
-        border: 1px solid #30363d;
-        margin-bottom: 15px;
-    }
-    
-    /* Neon Accents */
-    .neon-blue { color: #58a6ff; font-weight: bold; }
-    .neon-purple { color: #bc8cff; font-weight: bold; }
-    
-    /* Progress Bar Custom */
-    .stProgress > div > div > div > div { background-color: #238636; }
-    
-    /* Chat Bubbles */
-    .stChatMessage { background-color: #1c2128; border: 1px solid #30363d; border-radius: 10px; }
-    </style>
-    """, unsafe_allow_html=True)
+<style>
+body {
+    background: #0e1117;
+}
 
-# --- Session State ---
-if 'history' not in st.session_state: st.session_state.history = []
-if 'step' not in st.session_state: st.session_state.step = 0
-if 'resume_loaded' not in st.session_state: st.session_state.resume_loaded = False
+.glass {
+    background: rgba(255,255,255,0.06);
+    padding: 20px;
+    border-radius: 15px;
+    border: 1px solid rgba(0,255,255,0.3);
+    box-shadow: 0 0 20px rgba(0,255,255,0.2);
+    backdrop-filter: blur(10px);
+    margin-bottom: 15px;
+}
 
-# --- Sidebar (Left Analysis) ---
-with st.sidebar:
-    st.markdown("<h1 style='color:#58a6ff;'>Nexus-AI</h1>", unsafe_allow_html=True)
-    
-    # Resume Section
-    st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
-    if not st.session_state.resume_loaded:
-        uploaded = st.file_uploader("RESUME UPLOAD", type="pdf")
-        if uploaded:
-            st.session_state.resume_loaded = True
-            st.rerun()
+.status {
+    color: #00ffff;
+    font-weight: bold;
+    font-size: 18px;
+}
+
+</style>
+""", unsafe_allow_html=True)
+
+# =========================
+# SESSION STATE
+# =========================
+
+if "q_index" not in st.session_state:
+    st.session_state.q_index = 0
+
+if "questions" not in st.session_state:
+    st.session_state.questions = []
+
+if "answers" not in st.session_state:
+    st.session_state.answers = []
+
+if "scores" not in st.session_state:
+    st.session_state.scores = []
+
+if "resume_text" not in st.session_state:
+    st.session_state.resume_text = ""
+
+# =========================
+# SIDEBAR
+# =========================
+
+st.sidebar.title("Candidate Info")
+
+resume = st.sidebar.file_uploader("Upload Resume PDF")
+jd = st.sidebar.text_area("Job Description")
+
+# =========================
+# RESUME PARSER
+# =========================
+
+def extract_text(file):
+    reader = PdfReader(file)
+    text = ""
+    for page in reader.pages:
+        text += page.extract_text() or ""
+    return text
+
+if resume:
+    st.session_state.resume_text = extract_text(resume)
+
+# =========================
+# CHEATING DETECTION
+# =========================
+
+def detect_ai(text):
+    if len(text.split()) < 10:
+        return True
+    if "therefore" in text.lower():
+        return True
+    if "as an ai" in text.lower():
+        return True
+    return False
+
+# =========================
+# SCORING
+# =========================
+
+def score_answer(text):
+    sentiment = TextBlob(text).sentiment.polarity
+    length_score = min(len(text.split()) / 20, 5)
+    return round((sentiment + 1) * 2 + length_score, 2)
+
+# =========================
+# QUESTION GENERATION
+# =========================
+
+def generate_question():
+    if not model:
+        return "ERROR: GEMINI_API_KEY not set"
+
+    last_answer = st.session_state.answers[-1] if st.session_state.answers else ""
+
+    stages = [
+        "Resume based introduction question",
+        "Experience deep dive question",
+        "Technical scenario question",
+        "System design question",
+        "Behavioral question",
+        "Critical failure handling question"
+    ]
+
+    prompt = f"""
+You are Nexus-AI Senior Recruiter.
+
+Resume:
+{st.session_state.resume_text}
+
+Job Description:
+{jd}
+
+Previous Answer:
+{last_answer}
+
+Ask ONLY ONE question.
+Stage: {stages[st.session_state.q_index]}
+"""
+
+    return model.generate_content(prompt).text
+
+# =========================
+# UI
+# =========================
+
+st.title("🧠 Nexus-AI Intelligent Interviewer")
+
+st.camera_input("Live Camera Feed (Optional)")
+
+st.markdown('<div class="status">AI STATUS: Listening...</div>', unsafe_allow_html=True)
+
+# =========================
+# INTERVIEW FLOW
+# =========================
+
+if st.session_state.q_index < 6:
+
+    if st.button("Generate Question"):
+        q = generate_question()
+        st.session_state.questions.append(q)
+
+    if st.session_state.questions:
+        st.markdown(f'<div class="glass">{st.session_state.questions[-1]}</div>', unsafe_allow_html=True)
+
+    answer = st.text_area("Your Answer")
+
+    if st.button("Submit Answer") and answer:
+
+        st.session_state.answers.append(answer)
+
+        score = score_answer(answer)
+        st.session_state.scores.append(score)
+
+        if detect_ai(answer):
+            st.warning("⚠ AI-like answer detected!")
+
+        st.session_state.q_index += 1
+
+# =========================
+# FINAL REPORT
+# =========================
+
+if st.session_state.q_index >= 6:
+
+    avg_score = sum(st.session_state.scores) / len(st.session_state.scores)
+
+    if avg_score > 7:
+        verdict = "Strong Hire"
+    elif avg_score > 5:
+        verdict = "Hire"
     else:
-        st.success("✅ Resume Loaded")
-    st.markdown("</div>", unsafe_allow_html=True)
+        verdict = "No Hire"
 
-    # Progress & Analytics
-    st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
-    st.write("PROGRESS")
-    st.progress(len(st.session_state.history) * 10) # Dynamic progress
-    st.markdown("---")
-    st.write("📊 LIVE ANALYSIS")
-    st.write("Confidence: **85%**")
-    st.write("Sentiment: <span style='color:#bc8cff;'>COOPERATIVE</span>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-    
-    if st.button("Download Report 📥"):
-        st.toast("Generating Report...")
+    st.subheader("📊 Hiring Report")
 
-# --- Main Dashboard ---
-col_main, col_sec = st.columns([3, 1])
+    st.write("Average Score:", avg_score)
+    st.write("Verdict:", verdict)
 
-with col_sec:
-    # Security Monitor (Right Side)
-    st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
-    st.markdown("### 📹 LIVE SESSION")
-    st.camera_input("CAM_01", label_visibility="collapsed")
-    st.markdown("---")
-    st.markdown("### 🛡️ SECURITY MONITOR")
-    st.write("EYE TRACKING: <span style='color:#238636;'>STABLE</span>", unsafe_allow_html=True)
-    st.write("AUDIO CLARITY: <span style='color:#58a6ff;'>HIGH</span>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+    report = f"""
+NEXUS AI INTERVIEW REPORT
 
-with col_main:
-    # Chat Area
-    st.markdown("### 🤖 Interview Session")
-    
-    if not st.session_state.resume_loaded:
-        st.info("Awaiting Resume Upload...")
-    else:
-        for msg in st.session_state.history:
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
-        
-        if prompt := st.chat_input("Type your response..."):
-            st.session_state.history.append({"role": "user", "content": prompt})
-            with st.chat_message("user"): st.markdown(prompt)
-            
-            with st.chat_message("assistant"):
-                with st.spinner("Nexus-AI is thinking..."):
-                    # Simulating AI Response (Replace with actual Gemini call)
-                    response = model.generate_content(prompt).text
-                    st.markdown(response)
-                    st.session_state.history.append({"role": "assistant", "content": response})
+Date: {datetime.now()}
+
+Questions:
+{st.session_state.questions}
+
+Answers:
+{st.session_state.answers}
+
+Scores:
+{st.session_state.scores}
+
+Final Verdict: {verdict}
+"""
+
+    st.download_button("Download Report", report, "report.txt")
