@@ -1,51 +1,56 @@
 import streamlit as st
+import google.generativeai as genai
 import os
+from datetime import datetime
 from PyPDF2 import PdfReader
 from textblob import TextBlob
-import google.generativeai as genai
-from datetime import datetime
 
 # =========================
 # CONFIG
 # =========================
 
-st.set_page_config(page_title="Nexus-AI Interviewer", layout="wide")
+st.set_page_config(
+    page_title="Nexus AI Interviewer",
+    layout="wide"
+)
 
-api_key = os.getenv("GEMINI_API_KEY")
+API_KEY = os.getenv("GEMINI_API_KEY")
 
-model = None
-if api_key:
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-1.5-flash")
+if API_KEY:
+    genai.configure(api_key=API_KEY)
+    model = genai.GenerativeModel("gemini-2.0-flash")
+else:
+    model = None
+
 
 # =========================
-# CSS (Glassmorphism UI)
+# UI STYLE
 # =========================
 
 st.markdown("""
 <style>
+
 body {
-    background: #0e1117;
+background:#0e1117;
 }
 
 .glass {
-    background: rgba(255,255,255,0.06);
-    padding: 20px;
-    border-radius: 15px;
-    border: 1px solid rgba(0,255,255,0.3);
-    box-shadow: 0 0 20px rgba(0,255,255,0.2);
-    backdrop-filter: blur(10px);
-    margin-bottom: 15px;
+background: rgba(255,255,255,0.05);
+border-radius:20px;
+padding:20px;
+border:1px solid rgba(0,255,255,0.2);
+backdrop-filter: blur(12px);
+margin-bottom:15px;
 }
 
 .status {
-    color: #00ffff;
-    font-weight: bold;
-    font-size: 18px;
+color:#00ffff;
+font-weight:bold;
 }
 
 </style>
 """, unsafe_allow_html=True)
+
 
 # =========================
 # SESSION STATE
@@ -66,97 +71,154 @@ if "scores" not in st.session_state:
 if "resume_text" not in st.session_state:
     st.session_state.resume_text = ""
 
+
+# =========================
+# HEADER
+# =========================
+
+st.title("🧠 Nexus AI Intelligent Interviewer")
+
+st.markdown('<p class="status">AI STATUS: Listening...</p>',
+            unsafe_allow_html=True)
+
+
 # =========================
 # SIDEBAR
 # =========================
 
-st.sidebar.title("Candidate Info")
+st.sidebar.header("Candidate Setup")
 
 resume = st.sidebar.file_uploader("Upload Resume PDF")
-jd = st.sidebar.text_area("Job Description")
+
+job_description = st.sidebar.text_area(
+    "Paste Job Description"
+)
+
 
 # =========================
 # RESUME PARSER
 # =========================
 
-def extract_text(file):
+def extract_resume_text(file):
+
     reader = PdfReader(file)
+
     text = ""
+
     for page in reader.pages:
         text += page.extract_text() or ""
+
     return text
 
+
 if resume:
-    st.session_state.resume_text = extract_text(resume)
+    st.session_state.resume_text = extract_resume_text(resume)
+
+
+# =========================
+# CAMERA PANEL
+# =========================
+
+st.camera_input("📷 Camera Presence Detection (Optional)")
+
 
 # =========================
 # CHEATING DETECTION
 # =========================
 
-def detect_ai(text):
-    if len(text.split()) < 10:
+def detect_cheating(answer):
+
+    suspicious_words = [
+        "as an ai",
+        "language model",
+        "therefore",
+        "however"
+    ]
+
+    if len(answer.split()) < 6:
         return True
-    if "therefore" in text.lower():
-        return True
-    if "as an ai" in text.lower():
-        return True
+
+    for word in suspicious_words:
+        if word in answer.lower():
+            return True
+
     return False
 
-# =========================
-# SCORING
-# =========================
-
-def score_answer(text):
-    sentiment = TextBlob(text).sentiment.polarity
-    length_score = min(len(text.split()) / 20, 5)
-    return round((sentiment + 1) * 2 + length_score, 2)
 
 # =========================
-# QUESTION GENERATION
+# SCORING ENGINE
+# =========================
+
+def score_answer(answer):
+
+    sentiment = TextBlob(answer).sentiment.polarity
+
+    length_score = min(len(answer.split()) / 10, 5)
+
+    confidence_score = (sentiment + 1) * 2
+
+    total = round(length_score + confidence_score, 2)
+
+    return total
+
+
+# =========================
+# QUESTION ENGINE
 # =========================
 
 def generate_question():
+
     if not model:
-        return "ERROR: GEMINI_API_KEY not set"
+        return "❌ GEMINI_API_KEY missing"
 
-    last_answer = st.session_state.answers[-1] if st.session_state.answers else ""
+    stage_map = [
 
-    stages = [
-        "Resume based introduction question",
+        "Resume introduction question",
+
         "Experience deep dive question",
+
         "Technical scenario question",
-        "System design question",
-        "Behavioral question",
-        "Critical failure handling question"
+
+        "Problem solving question",
+
+        "Behavioral teamwork question",
+
+        "Failure handling leadership question"
     ]
 
-    prompt = f"""
-You are Nexus-AI Senior Recruiter.
+    last_answer = ""
 
-Resume:
+    if st.session_state.answers:
+        last_answer = st.session_state.answers[-1]
+
+    prompt = f"""
+
+You are Nexus AI Senior Recruiter.
+
+Candidate Resume:
+
 {st.session_state.resume_text}
 
 Job Description:
-{jd}
+
+{job_description}
 
 Previous Answer:
+
 {last_answer}
 
-Ask ONLY ONE question.
-Stage: {stages[st.session_state.q_index]}
+Ask ONLY ONE interview question.
+
+Stage:
+
+{stage_map[st.session_state.q_index]}
+
 """
 
-    return model.generate_content(prompt).text
+    response = model.generate_content(prompt)
 
-# =========================
-# UI
-# =========================
+    return response.text
 
-st.title("🧠 Nexus-AI Intelligent Interviewer")
-
-st.camera_input("Live Camera Feed (Optional)")
-
-st.markdown('<div class="status">AI STATUS: Listening...</div>', unsafe_allow_html=True)
 
 # =========================
 # INTERVIEW FLOW
@@ -165,25 +227,38 @@ st.markdown('<div class="status">AI STATUS: Listening...</div>', unsafe_allow_ht
 if st.session_state.q_index < 6:
 
     if st.button("Generate Question"):
-        q = generate_question()
-        st.session_state.questions.append(q)
+
+        question = generate_question()
+
+        st.session_state.questions.append(question)
 
     if st.session_state.questions:
-        st.markdown(f'<div class="glass">{st.session_state.questions[-1]}</div>', unsafe_allow_html=True)
+
+        st.markdown(
+
+            f'<div class="glass">{st.session_state.questions[-1]}</div>',
+
+            unsafe_allow_html=True
+        )
 
     answer = st.text_area("Your Answer")
 
-    if st.button("Submit Answer") and answer:
+    if st.button("Submit Answer"):
 
-        st.session_state.answers.append(answer)
+        if answer:
 
-        score = score_answer(answer)
-        st.session_state.scores.append(score)
+            st.session_state.answers.append(answer)
 
-        if detect_ai(answer):
-            st.warning("⚠ AI-like answer detected!")
+            score = score_answer(answer)
 
-        st.session_state.q_index += 1
+            st.session_state.scores.append(score)
+
+            if detect_cheating(answer):
+
+                st.warning("⚠ Possible AI-generated answer detected")
+
+            st.session_state.q_index += 1
+
 
 # =========================
 # FINAL REPORT
@@ -191,35 +266,59 @@ if st.session_state.q_index < 6:
 
 if st.session_state.q_index >= 6:
 
-    avg_score = sum(st.session_state.scores) / len(st.session_state.scores)
+    avg_score = sum(
+        st.session_state.scores
+    ) / len(st.session_state.scores)
 
-    if avg_score > 7:
-        verdict = "Strong Hire"
-    elif avg_score > 5:
-        verdict = "Hire"
+    if avg_score >= 7:
+
+        verdict = "🔥 STRONG HIRE"
+
+    elif avg_score >= 5:
+
+        verdict = "✅ HIRE"
+
     else:
-        verdict = "No Hire"
 
-    st.subheader("📊 Hiring Report")
+        verdict = "❌ NO HIRE"
+
+    st.header("📊 Final Hiring Report")
 
     st.write("Average Score:", avg_score)
+
     st.write("Verdict:", verdict)
 
     report = f"""
-NEXUS AI INTERVIEW REPORT
 
-Date: {datetime.now()}
+NEXUS AI REPORT
+
+Date:
+
+{datetime.now()}
 
 Questions:
+
 {st.session_state.questions}
 
 Answers:
+
 {st.session_state.answers}
 
 Scores:
+
 {st.session_state.scores}
 
-Final Verdict: {verdict}
+Verdict:
+
+{verdict}
+
 """
 
-    st.download_button("Download Report", report, "report.txt")
+    st.download_button(
+
+        "Download Interview Report",
+
+        report,
+
+        "nexus_ai_report.txt"
+    )
